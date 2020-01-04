@@ -94,20 +94,19 @@ typedef struct DDNode {
   time_t          dt;
   char            mods[MAX_MODS+1];
   char*           desc;
+  struct DDNode** nodes;
+  unsigned int    n;
 } DDNode;
 
 typedef struct DDList {
-  unsigned int   n;
-  unsigned char* depth; // nesting
-  DDNode*        nodes;
   char*          name;
+  DDNode         root;
 } DDList;
 
-size_t DDListLen(DDList* dl) {
-  size_t n = 0;
-  for(int i=0; i<dl->n; i++)
-    n += strlen(dl->nodes[i].desc) + 8 + 1;  // add 1 for terminating newline/null
-  return n;
+int DDNodeAddNode(DDNode* p, DDNode* c) {
+  p->nodes = realloc(p->nodes, (p->n+1)*sizeof(DDNode*));
+  p->nodes[p->n] = c;
+  return ++p->n;
 }
 
 char* DDListGetMakeRoot() {
@@ -180,16 +179,15 @@ char* DDListGetMakeStash() {
   return stashd;
 }
 
-void DDListToFD(DDList* ddl, int fd) {
+void DDNodeToFD(DDNode* node, int depth, int fd) {
   struct tm tm_dt = {0};
   char _dt[32] = {0}; char* dt = _dt;
-  for(int i=0; i<ddl->n; i++) {
-    // this date stuff is dumb!
-    sprintf(dt, "%ld", ddl->nodes[i].dt);
-    strptime(dt,     "%s",         &tm_dt);
-    strftime(dt, 32, "%y%m%d%H%M", &tm_dt);
-    dprintf(fd, "%*s%s {%s,%s} %s\n", 2*ddl->depth[i], "", "*", dt, ddl->nodes[i].mods, ddl->nodes[i].desc);
-  }
+  sprintf(dt,  "%ld", node->dt);
+  strptime(dt, "%s",  &tm_dt);
+  strftime(dt, 32, "%y%m%d%H%M", &tm_dt);
+  dprintf(fd, "%*s%s {%s,%s} %s\n", 2*depth, "", "*", dt, node->mods, node->desc);
+  for(int i=0; i<node->n; i++)
+    DDNodeToFD(node->nodes[i], depth+1, fd);
 }
 
 size_t DDListToFile(DDList* ddl, char* name) {
@@ -228,7 +226,8 @@ size_t DDListToFile(DDList* ddl, char* name) {
     return 0;
   }
 
-  DDListToFD(ddl, fd);
+  for(int i=0; i<ddl->root.n; i++)
+    DDNodeToFD(ddl->root.nodes[i], 0, fd);
   close(fd);
   return sz_pl;
 }
@@ -268,31 +267,32 @@ DDList* FileToDDList(char* name) {
 
   // Process line-by-line
   ddl        = calloc(1,sizeof(DDList));
-  ddl->nodes = calloc(nl_num, sizeof(DDNode));
-  ddl->depth = calloc(nl_num, sizeof(unsigned char));
   ddl->name  = strdup(name);
-  unsigned int indent[MAX_INDENT] = {0};  // ancestor indent amounts
+  unsigned int indent[MAX_INDENT]    = {0};  // ancestor indent amounts
+  DDNode*      parents[MAX_INDENT+1] = {0};  parents[0] = &ddl->root;
   int id       = 0;   // current indentation level
   int il       = -1;  // current line number (inc before, so negative)
 
   while(++il,p1 < pf) {
+    DDNode* node = calloc(1,sizeof(DDNode));
     int d = 0;
     while(isspace(*p1) && p1<=pf) {p1++;d++;} // skip spaces
     if(T[*p1]) while(T[*p1] && p1<=pf) p1++;  // bullet marks front of line
     p2 = p1;                                  // catch p2 up to p1
-    ddl->nodes[il].dt = tt_now;               // set default time
+    node->dt = tt_now;                        // set default time
 
     // Handle indentation
     // The indentation rule is as follows:
     // * inward indentations, no matter the depth, are worth 1
     // * outward indentations are matched as far as possible
     if(!il) indent[id] = d; // First line is always a top-level node
-    else if(d>indent[id]) {indent[id+=id<MAX_INDENT]=d;}  // Only indent once inward
+    else if(d>indent[id]) {indent[id+=id<MAX_INDENT]=d;} // Only indent once inward
     else {
       while(d<indent[id] && id>0) indent[id--]=0; // handle non-root by backtracking
       if(d<indent[id]) indent[id]=d;              // handle the root case
     }
-    ddl->depth[il] = id;
+    parents[id+1] = node;                         // I am my child's parent
+    DDNodeAddNode(parents[id], node);
 
     // Check to see if line has metadata (only if matching {}
     char *meta = NULL, *mb = NULL;
@@ -305,16 +305,15 @@ DDList* FileToDDList(char* name) {
       struct tm tmt = {0};
       if(mb = strptime(meta, "%y%m%d%H%M", &tmt)) {
         meta=mb;
-        ddl->nodes[il].dt = mktime(&tmt);
+        node->dt = mktime(&tmt);
       }
 
       // Process flags
-      memset(ddl->nodes[il].mods, 0, MAX_MODS+1);
       if(',' == *meta) meta++;
       for(int im=0; '}' !=*meta && im<MAX_MODS;im++) {
-        if('$' == *meta) ddl->nodes[il].done = 1;
-        if('?' == *meta) ddl->nodes[il].type = 1;
-        ddl->nodes[il].mods[im] = *meta++;
+        if('$' == *meta) node->done = 1;
+        if('?' == *meta) node->type = 1;
+        node->mods[im] = *meta++;
       }
       p1=++p2;  // skip metadata for payload
       while(isspace(*p1)) p1++;                 // skip any pre-payload spaces
@@ -323,12 +322,11 @@ DDList* FileToDDList(char* name) {
 
     // The rest of the line is the payload
     while('\n' != *p2) p2++;
-    ddl->nodes[il].desc = calloc(1+p2-p1,1);
-    memcpy(ddl->nodes[il].desc, p1, p2-p1);
+    node->desc = calloc(1+p2-p1,1);
+    memcpy(node->desc, p1, p2-p1);
     p1=++p2; // next line
   }
 
-  ddl->n = il;
   munmap(pi, sa.st_size);
   return ddl;
 }
@@ -385,19 +383,19 @@ void printn(DDNode* dn, int depth) {
   strcat(mods, A[at]); strcat(mods, F[fg]); strcat(mods, B[bg]);
 
   printf("%*s%s %s%s"CLS" "AT(2)"%dd"CLS"\n", depth, "", front, mods, dn->desc, days_diff(tt_now, dn->dt));
+  for(int i=0; i<dn->n; i++) printn(dn->nodes[i], depth+2);
 }
 
 void printd(DDList* ddl) {
   int n_todo=0, n_done=0;
-  for(int i=0; i<ddl->n; i++) {
-    n_todo += 0==ddl->nodes[i].type;
-    n_done += 1==ddl->nodes[i].done;
+  for(int i=0; i<ddl->root.n; i++) {
+    n_todo += 0==ddl->root.nodes[i]->type;
+    n_done += 1==ddl->root.nodes[i]->done;
   }
 
-  printf("\33[4m%s\33[0m\t[%d/%d]\n\n", ddl->name, n_done, n_todo);
-
-  for(int i=0; i<ddl->n; i++)
-    printn(&ddl->nodes[i], 1+2*ddl->depth[i]);
+  printf(" \33[4m%s\33[0m\t[%d/%d]\n\n", ddl->name, n_done, n_todo);
+  for(int i=0; i<ddl->root.n; i++)
+    printn(ddl->root.nodes[i], 1);
 }
 
 
