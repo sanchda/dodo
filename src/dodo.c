@@ -335,7 +335,7 @@ DDList* FileToDDList(char* name) {
 /******************************************************************************\
 |                        DDNode, DDList Print Functions                        |
 \******************************************************************************/
-void printn(DDNode* dn, int depth) {
+void DDNodeToTextPrint(DDNode* dn, int depth) {
   char bg=9, fg=9, sp=0; int  at=0;
   for(int i=0; i<MAX_MODS; i++) {
     switch(dn->mods[i]) {
@@ -383,10 +383,10 @@ void printn(DDNode* dn, int depth) {
   strcat(mods, A[at]); strcat(mods, F[fg]); strcat(mods, B[bg]);
 
   printf("%*s%s %s%s"CLS" "AT(2)"%dd"CLS"\n", depth, "", front, mods, dn->desc, days_diff(tt_now, dn->dt));
-  for(int i=0; i<dn->n; i++) printn(dn->nodes[i], depth+2);
+  for(int i=0; i<dn->n; i++) DDNodeToTextPrint(dn->nodes[i], depth+2);
 }
 
-void printd(DDList* ddl) {
+void DDListPrint(DDList* ddl) {
   int n_todo=0, n_done=0;
   for(int i=0; i<ddl->root.n; i++) {
     n_todo += 0==ddl->root.nodes[i]->type;
@@ -395,7 +395,25 @@ void printd(DDList* ddl) {
 
   printf(" \33[4m%s\33[0m\t[%d/%d]\n\n", ddl->name, n_done, n_todo);
   for(int i=0; i<ddl->root.n; i++)
-    printn(ddl->root.nodes[i], 1);
+    DDNodeToTextPrint(ddl->root.nodes[i], 1);
+}
+
+int DDNodeUserCompare(const void* _a, const void* _b) {
+  const DDNode *a = *(DDNode**)_a, *b = *(DDNode**)_b;
+  char c = 0;
+  if(a->done) return 1;       // Skip if marked done
+  printf("a) %s\nb) %s\nx) either\n",a->desc,b->desc);
+  while(c!='a' && c!='b' && c!='x')
+    c = (-1==read(STDIN_FILENO, &c, 1)) ? 0 : tolower(c);
+  return 'x' == c ? 0 :
+         'a' == c ? -1 : 1;
+}
+
+void DDListSort(DDList* ddl) {
+  void qsort(void *base, size_t nmemb, size_t size,
+                 int (*compar)(const void *, const void *));
+  printf("Select the item which should be done first.\n");
+  qsort((void*)ddl->root.nodes, ddl->root.n, sizeof(DDNode*), DDNodeUserCompare);
 }
 
 
@@ -405,7 +423,8 @@ void printd(DDList* ddl) {
 int main(int argc, char *argv[]) {
   if(argc < 2) return -1;
   DDList* ddl = FileToDDList(argv[1]);
-  printd(ddl);
-  DDListToFile(ddl, argv[1]);
+  DDListSort(ddl);
+  DDListPrint(ddl);
+//  DDListToFile(ddl, argv[1]);
   return 0;
 }
