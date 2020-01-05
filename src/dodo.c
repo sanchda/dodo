@@ -336,42 +336,17 @@ DDList* FileToDDList(char* name) {
 |                        DDNode, DDList Print Functions                        |
 \******************************************************************************/
 void DDNodeToTextPrint(DDNode* dn, int depth) {
+  static char fcord[] = "krgybmcw";
+  static char bcord[] = "KRGYBMCW";
+  static char acord[] = "012457";
+  static char scord[] = "$!#@?"; static int sval[] = {SP_DONE, SP_HIPR, SP_STAR, SP_LOVE, SP_NOTE};
   char bg=9, fg=9, sp=0; int  at=0;
   for(int i=0; i<MAX_MODS; i++) {
-    switch(dn->mods[i]) {
-      // TODO this is dumb
-      // lowercase => fg
-      case 'k': fg = 0;        break;
-      case 'r': fg = 1;        break;
-      case 'g': fg = 2;        break;
-      case 'y': fg = 3;        break;
-      case 'b': fg = 4;        break;
-      case 'm': fg = 5;        break;
-      case 'c': fg = 6;        break;
-      case 'w': fg = 7;        break;
-      // uppercase => bg
-      case 'K': bg = 0;        break;
-      case 'R': bg = 1;        break;
-      case 'G': bg = 2;        break;
-      case 'Y': bg = 3;        break;
-      case 'B': bg = 4;        break;
-      case 'M': bg = 5;        break;
-      case 'C': bg = 6;        break;
-      case 'W': bg = 7;        break;
-      // numerics => display attributes
-      case '0': at  = 0;       break;
-      case '1': at |= 1<<0;    break;
-      case '2': at |= 1<<1;    break;
-      case '4': at |= 1<<2;    break;
-      case '5': at |= 1<<3;    break;
-      case '7': at |= 1<<4;    break;
-      // others => special decorators
-      case '$': sp |= SP_DONE; break;  // done
-      case '!': sp |= SP_HIPR; break;  // hipri
-      case '#': sp |= SP_STAR; break;  // star
-      case '@': sp |= SP_LOVE; break;  // heart
-      case '?': sp |= SP_NOTE; break;  // note (not a todo)
-    }
+    if(isalpha(dn->mods[i])) {
+      if(islower(dn->mods[i]))    for(int j=0; j<8; j++) if(fcord[j] == dn->mods[i]) {fg=j;         break;}
+      else                        for(int j=0; j<8; j++) if(bcord[j] == dn->mods[i]) {bg=j;         break;} }
+    else if(isdigit(dn->mods[i])) for(int j=0; j<6; j++) if(acord[j] == dn->mods[i]) {at|=1<<j;     break;}
+    else                          for(int j=0; j<5; j++) if(scord[j] == dn->mods[i]) {sp|=scord[j]; break;}
   }
 
   char* front = SP_NOTE & sp ? sp_note :
