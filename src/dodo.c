@@ -67,7 +67,7 @@ void print_help() {
 "  -A, --plaintext       do not print with colors or other attributes\n"
 "\n"
 "Input/Output:\n"
-"  Not yet implemented.\n"
+"  -s, --sort            asks the user questions in order to sort entries\n"
 "\n\n"
 "Todo Lists\n"
 "\n"
