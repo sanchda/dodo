@@ -11,9 +11,19 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
-
 #include <sys/time.h>
 #include <pwd.h>
+#include <getopt.h>
+
+
+/******************************************************************************\
+|                                   Version                                    |
+                                    Version
+\******************************************************************************/
+#define DD_MAJOR 0
+#define DD_MINOR 2
+static int dd_major = DD_MAJOR, dd_minor = DD_MINOR;
+
 
 /******************************************************************************\
 |                                   Helpers                                    |
@@ -37,6 +47,66 @@ static inline int days_diff(time_t a, time_t b) {
 
 static inline char hasterm(char* path) {return '/' == path[strlen(path)-1];}
 
+void print_help() {
+  static char help[] = ""
+"Usage: dodo [OPTION]... LIST\n"
+"Display a todo list\n"
+"Example: dodo foo\n"
+"\n"
+"Miscellaneous:\n"
+"  -v, --version         display version information and exit\n"
+"  -h, --help            display this help and exit\n"
+"  -q, --quiet           do not display output\n"
+"  -d, --dry_run         do not write output (even if specified)\n"
+"\n"
+"Display:\n"
+"  -E, --noextra         do not show tagged items (.e.g., heart, star)\n"
+"  -N, --nonote          do not show notes\n"
+"  -T, --notodo          do not show uncompleted todo items\n"
+"  -K, --nokids          do not show children\n"
+"  -A, --plaintext       do not print with colors or other attributes\n"
+"\n"
+"Input/Output:\n"
+"  Not yet implemented.\n"
+"\n\n"
+"Todo Lists\n"
+"\n"
+"A todo list is a newline-delimited file whose entries are indented lines "
+"beginning with an optional bullet (*, -, +, etc).  By default, dodo will look "
+"in its stash directory (the .dodo/stash subdirectory of the current user's home) "
+"for todo lists.  Upon reading a list, dodo will look for optional line-level "
+"metadata, such as an entry timestamp, and display the list according to the "
+"specified display parameters.  It will then overwrite the list with the "
+"additional metadata.\n"
+"\n"
+"For example, the following list:"
+"  * write useful todo documentation\n"
+"    * add some subtasks\n"
+"    * think of a witty joke\n"
+"  * send holiday thank-you cards\n"
+"\n"
+"will be overwritten by:\n"
+"  * {2001062201,} write useful todo documentation\n"
+"    * {2001062201,} add some subtasks\n"
+"    * {2001062201,} think of a witty joke\n"
+"  * {2001062201,} send holiday thank-you cards\n"
+"\n"
+"The text in the curly brackets indicate the entry date in YYMMDDhhmm format, "
+"followed by modifiers that alter the display or behavior of the item.\n"
+"\n"
+"The modifiers are:\n"
+"krgybmcw - black, red, green, yellow, blue, magenta, cyan, white text\n"
+"KRGYBMCW - same colors, but the background\n"
+"12457 - bright, dim, underscore, blink, reverse\n"
+"!@# - show a !, heart, or star\n"
+"? - item is a note\n"
+"$ - item is complete"
+"\n";
+  printf("%s\n",help);
+
+}
+
+void print_version() { printf("dodo %d.%d\n", dd_major, dd_minor); }
 
 /******************************************************************************\
 |                              VT-100 Formatters                               |
@@ -65,11 +135,13 @@ char*A[]={AT(0),
   AT(5) AT(4) AT(1) AT(2)};
 
 typedef enum sp_type {
-  SP_DONE = 1<<0,
-  SP_HIPR = 1<<1,
-  SP_STAR = 1<<2,
-  SP_LOVE = 1<<3,
-  SP_NOTE = 1<<4
+  SP_TODO  = 0,
+  SP_DONE  = 1<<0,
+  SP_HIPR  = 1<<1,
+  SP_STAR  = 1<<2,
+  SP_LOVE  = 1<<3,
+  SP_NOTE  = 1<<4,
+  SP_EXTRA = (SP_HIPR | SP_STAR | SP_LOVE)
 } sp_type;
 
 static char sp_todo[] = FG(5)"□"FG(9);
@@ -78,6 +150,19 @@ static char sp_hipr[] = FG(6)"!"FG(9);
 static char sp_star[] = FG(3)"★"FG(9);
 static char sp_love[] = FG(1)"♡"FG(9);
 static char sp_note[] = FG(4)"•"FG(9);
+
+
+/******************************************************************************\
+|                              Preference Globals                              |
+\******************************************************************************/
+static char DD_show_extra    = 1;
+static char DD_show_note     = 1;
+static char DD_show_todo     = 1;
+static char DD_show_done     = 1;
+static char DD_show_children = 1;
+static char DD_force_yes     = 0;
+static char DD_plaintext     = 0;
+static char DD_quiet         = 0;
 
 
 /******************************************************************************\
@@ -338,17 +423,22 @@ DDList* FileToDDList(char* name) {
 void DDNodeToTextPrint(DDNode* dn, int depth) {
   static char fcord[] = "krgybmcw";
   static char bcord[] = "KRGYBMCW";
-  static char acord[] = "012457";
-  static char scord[] = "$!#@?"; static int sval[] = {SP_DONE, SP_HIPR, SP_STAR, SP_LOVE, SP_NOTE};
-  char bg=9, fg=9, sp=0; int  at=0;
-  for(int i=0; i<MAX_MODS; i++) {
-    if(isalpha(dn->mods[i])) {
-      if(islower(dn->mods[i]))    for(int j=0; j<8; j++) if(fcord[j] == dn->mods[i]) {fg=j;         break;}
-      else                        for(int j=0; j<8; j++) if(bcord[j] == dn->mods[i]) {bg=j;         break;} }
-    else if(isdigit(dn->mods[i])) for(int j=0; j<6; j++) if(acord[j] == dn->mods[i]) {at|=1<<j;     break;}
-    else                          for(int j=0; j<5; j++) if(scord[j] == dn->mods[i]) {sp|=scord[j]; break;}
+  static char acord[] = "012457}}";
+  static char scord[] = "$!#@?}}}"; static int sval[] = {SP_DONE, SP_HIPR, SP_STAR, SP_LOVE, SP_NOTE};
+  char bg=9, fg=9, sp=0; int at=0,j=0,i=0;
+  for(i=0; i<MAX_MODS; i++) {
+    for(j=0; j<8; j++) {
+      if(fcord[j] == dn->mods[i]) fg=j;
+      if(bcord[j] == dn->mods[i]) bg=j;
+      if(acord[j] == dn->mods[i]) at|=1<<j;
+      if(scord[j] == dn->mods[i]) sp|=sval[j];
+    }
   }
 
+  if(!DD_show_note  && (SP_NOTE & sp)) return;
+  if(!DD_show_done  && (SP_DONE & sp)) return;
+  if(!DD_show_todo  && SP_TODO == sp)  return;
+  if(!DD_show_extra && ((SP_HIPR | SP_STAR | SP_LOVE) & sp)) return;
   char* front = SP_NOTE & sp ? sp_note :
                 SP_DONE & sp ? sp_done :
                 SP_HIPR & sp ? sp_hipr :
@@ -357,8 +447,14 @@ void DDNodeToTextPrint(DDNode* dn, int depth) {
   char _mods[32] = {0}; char* mods = _mods;
   strcat(mods, A[at]); strcat(mods, F[fg]); strcat(mods, B[bg]);
 
-  printf("%*s%s %s%s"CLS" "AT(2)"%dd"CLS"\n", depth, "", front, mods, dn->desc, days_diff(tt_now, dn->dt));
-  for(int i=0; i<dn->n; i++) DDNodeToTextPrint(dn->nodes[i], depth+2);
+  if(DD_plaintext)
+    printf("%*s %s %dd\n", depth, "", dn->desc, days_diff(tt_now, dn->dt));
+  else
+    printf("%*s%s %s%s"CLS" "AT(2)"%dd"CLS"\n", depth, "", front, mods, dn->desc, days_diff(tt_now, dn->dt));
+
+  if(DD_show_children)
+    for(int i=0; i<dn->n; i++)
+      DDNodeToTextPrint(dn->nodes[i], depth+2);
 }
 
 void DDListPrint(DDList* ddl) {
@@ -395,11 +491,56 @@ void DDListSort(DDList* ddl) {
 /******************************************************************************\
 |                                  Entrypoint                                  |
 \******************************************************************************/
+typedef enum DDPost {
+  DDP_SORT   = 1<<0,
+  DDP_DRY    = 1<<1,
+  DDP_EXPORT = 1<<2,
+} DDPost;
+
 int main(int argc, char *argv[]) {
-  if(argc < 2) return -1;
-  DDList* ddl = FileToDDList(argv[1]);
-  DDListSort(ddl);
-  DDListPrint(ddl);
-//  DDListToFile(ddl, argv[1]);
+  int c = 0, oi = 1;
+  unsigned int post = 0;
+  char *ipath = NULL, *opath = NULL;
+  static struct option lopts[] = {
+    {"import", required_argument, 0, 'i'},
+    {"output", required_argument, 0, 'o'},
+    {"help",         no_argument, 0, 'h'},
+    {"version",      no_argument, 0, 'v'},
+    {"quiet",        no_argument, 0, 'q'},
+    {"sort",         no_argument, 0, 's'},
+    {"dry_run",      no_argument, 0, 'd'},
+    {"noextra",      no_argument, 0, 'E'},
+    {"nonote",       no_argument, 0, 'N'},
+    {"nodone",       no_argument, 0, 'D'},
+    {"notodo",       no_argument, 0, 'T'},
+    {"nokids",       no_argument, 0, 'K'},
+    {"noattr",       no_argument, 0, 'A'},
+    {0}};
+
+  if(1==argc) return -1;
+  while(-1!=(c=getopt_long(argc, argv, "+i:o:hVqsdENDTKA", lopts, &oi))) {
+    switch(c) {
+    case 'i': ipath = optarg;        break;
+    case 'o': opath = optarg;        break;
+    case 'h': print_help();          return 0;
+    case 'v': print_version();       return 0;
+    case 'q': DD_quiet = 1;          break;
+    case 's': post |= DDP_SORT;      break;
+    case 'd': post |= DDP_DRY;       break;
+    case 'E': DD_show_extra= 0;      break;
+    case 'N': DD_show_note = 0;      break;
+    case 'D': DD_show_done = 0;      break;
+    case 'T': DD_show_todo = 0;      break;
+    case 'K': DD_show_children = 0;  break;
+    case 'A': DD_plaintext = 1;      break;
+    default: printf("Unrecognized option %s\n",argv[oi]); return -1;
+    }
+  }
+
+  DDList* ddl = FileToDDList(argv[argc-1]);
+
+  if(post & DDP_SORT)    DDListSort(ddl);
+  if(!DD_quiet)          DDListPrint(ddl);
+  if(!(post & DDP_DRY))  DDListToFile(ddl, argv[argc-1]);
   return 0;
 }
