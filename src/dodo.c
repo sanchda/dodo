@@ -18,7 +18,6 @@
 
 /******************************************************************************\
 |                                   Version                                    |
-                                    Version
 \******************************************************************************/
 #define DD_MAJOR 0
 #define DD_MINOR 2
@@ -380,7 +379,7 @@ DDList* FileToDDList(char* name) {
     DDNodeAddNode(parents[id], node);
 
     // Check to see if line has metadata (only if matching {}
-    char *meta = NULL, *mb = NULL;
+    unsigned char *meta = NULL, *mb = NULL;
     if('{' == *p1) {
       while('}' != *p2 && '\n' != *p2 && p2<=pf) p2++;  // until }, EOR, EOF
       if('}' == *p2) meta = p1+1;                       // proceed to get meta
