@@ -27,18 +27,8 @@ static int dd_major = DD_MAJOR, dd_minor = DD_MINOR;
 /******************************************************************************\
 |                                   Helpers                                    |
 \******************************************************************************/
-struct timeval tv_now     = {0};  // hold timevalified time
-char           ts_now[21] = {0};  // hold stringified unix time
 time_t         tt_now     = {0};  // hold regular unix time
-struct tm      tm_now     = {0};  // hold broken-down time of now
-
-void time_init() {
-  // Slightly inaccurate, since the times won't be identical between the first two calls
-  tt_now = time(NULL);
-  gettimeofday(&tv_now, NULL);
-  sprintf(ts_now, "%lu", tt_now);
-  strptime(ts_now, "%s", &tm_now);
-}
+void time_init() {tt_now = time(NULL);}
 
 static inline int days_diff(time_t a, time_t b) {
   return (a>b ? a-b : b-a)/86400;
@@ -193,11 +183,13 @@ int DDNodeAddNode(DDNode* p, DDNode* c) {
   return ++p->n;
 }
 
-char* DDListGetMakeRoot() {
+char* DDGetMakeRoot() {
   static char dodo_subdir[] = ".dodo/";
   char *rootd = NULL, *buf = NULL;
   DIR* dir;
   struct stat sa = {0};
+
+  // Check whether the user defined the DODO_ROOT env var
   if((buf=getenv("DODO_ROOT"))) {
 
     // Reject if not absolute path
@@ -240,12 +232,12 @@ char* DDListGetMakeRoot() {
   return rootd;
 }
 
-char* DDListGetMakeStash() {
+char* DDGetMakeStash() {
   static char dodo_stash[] = "stash/";
   char *stashd;
   DIR* dir;
   if(!DODO_ROOT) {
-    if(!DDListGetMakeRoot()) return NULL;
+    if(!DDGetMakeRoot()) return NULL;
   }
   stashd = calloc(1,strlen(DODO_ROOT) + 1 + strlen(dodo_stash) + 1);
   strcpy(stashd, DODO_ROOT);
@@ -274,46 +266,42 @@ void DDNodeToFD(DDNode* node, int depth, int fd) {
     DDNodeToFD(node->nodes[i], depth+1, fd);
 }
 
-size_t DDListToFile(DDList* ddl, char* name) {
-  static char dodo_temp[] = "DODO_TEMP_FILE_PLEASE_IGNORE";
-  int fd = -1, l=0;
-  size_t sz_pl = 0;
-  char *fpath = NULL, *ftemp = NULL;
+char DDListToFile(DDList* ddl, char* name) {
+  int fd = -1, rc = 0;
   unsigned char *payload = NULL, *p = NULL;
-  if(!DDListGetMakeStash()) return 0;
-  fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1);
+  if(!DDGetMakeStash()) return 0;
+  char *fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1 );
+  char *ftemp = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1 + 6 + 1);
+
+  // Build the directory tree for the stash
   strcpy(fpath, DODO_STASH);
   if(!hasterm(DODO_STASH)) strcat(fpath, "/");
   strcat(fpath, name);
 
-  // We have data to serialize, but we don't want to step on anyone who might
-  // be reading the data.  We'll unlink then reopen, but we want to avoid the
-  // situation where we have permissions to unlink, but not re-create.
-  // We'll create and delete a canary file first, which presumes that the mode
-  // of the stash directory isn't changing within this window...
-  ftemp = calloc(1,strlen(DODO_STASH) + 1 + strlen(dodo_temp) + 1);
-  strcpy(ftemp, DODO_STASH);
-  if(!hasterm(DODO_STASH)) strcat(ftemp, "/");
-  strcat(ftemp, dodo_temp);
-  if(-1==( (fd = open(ftemp, O_CREAT, S_IRUSR | S_IWUSR)),close(fd),fd) ) {
+  // Build the temp filename based on stash path and open it
+  strcpy(ftemp, fpath);
+  strcat(ftemp, ".XXXXXX");
+  if(-1==((fd=mkstemp(ftemp)))) {
     printf("<ERR> I cannot create the stash for %s.\n", fpath);
-    free(ftemp);
-    free(fpath);
-    return 0;
+    rc = -1;
+    goto DDLTOF_CLEANUP;
   }
 
-  unlink(ftemp);
-  unlink(fpath);
-  if(-1==(fd = open(fpath, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR))) {
-    free(payload);
-    printf("<ERR> I cannot open the stash for %s.\n", fpath);
-    return 0;
-  }
-
+  // Populate new temp file
   for(int i=0; i<ddl->root.n; i++)
     DDNodeToFD(ddl->root.nodes[i], 0, fd);
+
+  // Rename to the desired path and we're done
+  if(-1==(rename(ftemp, fpath))) {
+    printf("<ERR> I cannot finalize the stash for %s.\n", fpath);
+    rc = -1;
+  }
+
+DDLTOF_CLEANUP:
   close(fd);
-  return sz_pl;
+  unlink(ftemp);
+  free(fpath); free(ftemp);
+  return rc;
 }
 
 DDList* FileToDDList(char* name) {
@@ -324,7 +312,7 @@ DDList* FileToDDList(char* name) {
   int fd = -1;
   struct stat sa = {0};
   time_init();
-  if(!DDListGetMakeStash()) return NULL;
+  if(!DDGetMakeStash()) return NULL;
 
   fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1);
   strcpy(fpath, DODO_STASH);
