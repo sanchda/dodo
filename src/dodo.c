@@ -20,7 +20,7 @@
 |                                   Version                                    |
 \******************************************************************************/
 #define DD_MAJOR 0
-#define DD_MINOR 2
+#define DD_MINOR 3
 static int dd_major = DD_MAJOR, dd_minor = DD_MINOR;
 
 
@@ -46,7 +46,6 @@ void print_help() {
 "  -v, --version         display version information and exit\n"
 "  -h, --help            display this help and exit\n"
 "  -q, --quiet           do not display output\n"
-"  -d, --dry_run         do not write output (even if specified)\n"
 "\n"
 "Display:\n"
 "  -E, --noextra         do not show tagged items (.e.g., heart, star)\n"
@@ -57,16 +56,25 @@ void print_help() {
 "\n"
 "Input/Output:\n"
 "  -s, --sort            asks the user questions in order to sort entries\n"
+"  -o, --output          write to the specified location instead of the stash\n"
+"                        given by LIST.  Ignored if -d also given.\n"
+"  -d, --dry_run         do not save output (even if specified)\n"
+"\n"
+"Environment Variables\n"
+"dodo inspects the DODO_ROOT environment variable to look for configuration\n"
+"files and data, such as the stashes (saved todo lists which can be tracked by\n"
+"name).  This directory must exist, be writable by the current user, and be\n"
+"represented as an absolute path."
 "\n\n"
 "Todo Lists\n"
-"\n"
-"A todo list is a newline-delimited file whose entries are indented lines "
-"beginning with an optional bullet (*, -, +, etc).  By default, dodo will look "
-"in its stash directory (the .dodo/stash subdirectory of the current user's home) "
-"for todo lists.  Upon reading a list, dodo will look for optional line-level "
-"metadata, such as an entry timestamp, and display the list according to the "
-"specified display parameters.  It will then overwrite the list with the "
-"additional metadata.\n"
+"A todo list is a newline-delimited file whose entries are indented lines\n"
+"beginning with an optional bullet (*, -, +, etc).  By default, dodo will look\n"
+"in its stash directory (the .dodo/stash subdirectory of the current user's home)\n"
+"for todo lists, unless the LIST is contains a slash--eg foo/mylist for a\n"
+"relative path or ./mylist for a file in the local directory.  Upon reading a\n"
+"list, dodo will look for optional line-level metadata, such as an entry\n"
+"timestamp, and display the list according to the specified display parameters.\n"
+"It will then overwrite the list with the additional metadata.\n"
 "\n"
 "For example, the following list:"
 "  * write useful todo documentation\n"
@@ -80,7 +88,7 @@ void print_help() {
 "    * {2001062201,} think of a witty joke\n"
 "  * {2001062201,} send holiday thank-you cards\n"
 "\n"
-"The text in the curly brackets indicate the entry date in YYMMDDhhmm format, "
+"The text in the curly brackets indicate the entry date in YYMMDDhhmm format,\n"
 "followed by modifiers that alter the display or behavior of the item.\n"
 "\n"
 "The modifiers are:\n"
@@ -266,23 +274,37 @@ void DDNodeToFD(DDNode* node, int depth, int fd) {
     DDNodeToFD(node->nodes[i], depth+1, fd);
 }
 
-char DDListToFile(DDList* ddl, char* name) {
+char DDListToFile(DDList* ddl, char* arg) {
   int fd = -1, rc = 0;
   unsigned char *payload = NULL, *p = NULL;
-  if(!DDGetMakeStash()) return 0;
-  char *fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1 );
-  char *ftemp = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1 + 6 + 1);
+  char *name = NULL, *fpath = NULL, *ftemp = NULL;
 
-  // Build the directory tree for the stash
-  strcpy(fpath, DODO_STASH);
-  if(!hasterm(DODO_STASH)) strcat(fpath, "/");
-  strcat(fpath, name);
+  if(strchr(arg, '/')) {   // if it's a path, use the exact file
+    name = strrchr(arg, '/')+1;
+    fpath = name;
+    ftemp = calloc(1, strlen(fpath) + 1 + 6 + 1);
+  } else {                 // if not, use the name as a base
+    name = arg;
+    if(!DDGetMakeStash()) return 0;
+    fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1 );
+    ftemp = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1 + 6 + 1);
 
-  // Build the temp filename based on stash path and open it
+    // Build the directory tree for the stash
+    strcpy(fpath, DODO_STASH);
+    if(!hasterm(DODO_STASH)) strcat(fpath, "/");
+    strcat(fpath, name);
+  }
+
+
+  // Build the temp filename based on stash path
   strcpy(ftemp, fpath);
   strcat(ftemp, ".XXXXXX");
+
+  // Open the temp file
   if(-1==((fd=mkstemp(ftemp)))) {
     printf("<ERR> I cannot create the stash for %s.\n", fpath);
+    if(strchr(arg, '/')) free(fpath);
+    free(ftemp);
     rc = -1;
     goto DDLTOF_CLEANUP;
   }
@@ -294,39 +316,52 @@ char DDListToFile(DDList* ddl, char* name) {
   // Rename to the desired path and we're done
   if(-1==(rename(ftemp, fpath))) {
     printf("<ERR> I cannot finalize the stash for %s.\n", fpath);
+    if(strchr(arg, '/')) free(fpath);
+    free(ftemp);
     rc = -1;
   }
 
 DDLTOF_CLEANUP:
   close(fd);
   unlink(ftemp);
-  free(fpath); free(ftemp);
+  if(strchr(arg, '/')) free(fpath);
+  free(ftemp);
   return rc;
 }
 
-DDList* FileToDDList(char* name) {
+DDList* FileToDDList(char* arg) {
   static char T[256] = {0};T['*']=T['-']=T['+']=T['.']=T['>']=T['<']=T['#']=T[' ']=T['\t']=1;
   DDList* ddl;
-  char* fpath = NULL;
+  char *fpath = NULL, *name = NULL;
   unsigned char *pi = NULL, *pf = NULL;
   int fd = -1;
   struct stat sa = {0};
   time_init();
-  if(!DDGetMakeStash()) return NULL;
 
-  fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1);
-  strcpy(fpath, DODO_STASH);
-  if(!hasterm(DODO_STASH)) strcat(fpath, "/");
-  strcat(fpath, name);
+  if(strchr(arg, '/')) {     // it's a path, so open the exact file
+    fpath = arg;
+    name = strrchr(arg, '/')+1;
+  } else {                   // it's a name, so refer to the stash
+    name = arg;
+    if(!DDGetMakeStash()) return NULL;
+    fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1);
+    strcpy(fpath, DODO_STASH);
+    if(!hasterm(DODO_STASH)) strcat(fpath, "/");
+    strcat(fpath, name);
+  }
+
   if(stat(fpath, &sa)) {
     printf("<ERR> Problem stat()ing the stash for %s.\n", fpath);
+    if(strchr(arg, '/')) free(fpath);
     return NULL;
   }
   if(-1==(fd = open(fpath, 0, S_IRUSR | S_IWUSR))) {
     printf("<ERR> Problem opening the stash for %s.\n", fpath);
+    if(strchr(arg, '/')) free(fpath);
     return NULL;
   }
-  pi = mmap(NULL, sa.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  if(!strchr(arg, '/')) free(fpath);
+  pi = mmap(NULL, sa.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // map private -> CoW per page?
   pf = &pi[sa.st_size-1];
   close(fd);
 
@@ -487,9 +522,8 @@ typedef enum DDPost {
 int main(int argc, char *argv[]) {
   int c = 0, oi = 1;
   unsigned int post = 0;
-  char *ipath = NULL, *opath = NULL;
+  char *oarg = NULL;
   static struct option lopts[] = {
-    {"import", required_argument, 0, 'i'},
     {"output", required_argument, 0, 'o'},
     {"help",         no_argument, 0, 'h'},
     {"version",      no_argument, 0, 'v'},
@@ -505,10 +539,9 @@ int main(int argc, char *argv[]) {
     {0}};
 
   if(1==argc) return -1;
-  while(-1!=(c=getopt_long(argc, argv, "+i:o:hVqsdENDTKA", lopts, &oi))) {
+  while(-1!=(c=getopt_long(argc, argv, "+i:o:hvqsdENDTKA", lopts, &oi))) {
     switch(c) {
-    case 'i': ipath = optarg;        break;
-    case 'o': opath = optarg;        break;
+    case 'o': oarg = optarg;         break;
     case 'h': print_help();          return 0;
     case 'v': print_version();       return 0;
     case 'q': DD_quiet = 1;          break;
@@ -528,6 +561,6 @@ int main(int argc, char *argv[]) {
 
   if(post & DDP_SORT)    DDListSort(ddl);
   if(!DD_quiet)          DDListPrint(ddl);
-  if(!(post & DDP_DRY))  DDListToFile(ddl, argv[argc-1]);
+  if(!(post & DDP_DRY))  DDListToFile(ddl, oarg ? oarg : argv[argc-1]);
   return 0;
 }
