@@ -53,6 +53,7 @@ void print_help() {
 "  -T, --notodo          do not show uncompleted todo items\n"
 "  -K, --nokids          do not show children\n"
 "  -A, --plaintext       do not print with colors or other attributes\n"
+"  -L, --literal         print the results using dodo's native format\n"
 "\n"
 "Input/Output:\n"
 "  -s, --sort            asks the user questions in order to sort entries\n"
@@ -98,12 +99,17 @@ void print_help() {
 "!@# - show a !, heart, or star\n"
 "? - item is a note\n"
 "$ - item is complete"
-"\n";
+"\n\n"
+"dodo supports input lists streamed from stdin.  In that case, the LIST gives the\n"
+"output location (equivalently, -o can be used).  If no LIST or -o is given,\n"
+"dodo will merely print the results to stdout.\n";
   printf("%s\n",help);
 
 }
 
 void print_version() { printf("dodo %d.%d\n", dd_major, dd_minor); }
+
+void print_summary() {}
 
 /******************************************************************************\
 |                              VT-100 Formatters                               |
@@ -160,6 +166,7 @@ static char DD_show_children = 1;
 static char DD_force_yes     = 0;
 static char DD_plaintext     = 0;
 static char DD_quiet         = 0;
+static char DD_literal       = 0;
 
 
 /******************************************************************************\
@@ -329,41 +336,9 @@ DDLTOF_CLEANUP:
   return rc;
 }
 
-DDList* FileToDDList(char* arg) {
+void CharToDDList(DDList* ddl, unsigned char* pi, unsigned char* pf) {
   static char T[256] = {0};T['*']=T['-']=T['+']=T['.']=T['>']=T['<']=T['#']=T[' ']=T['\t']=1;
-  DDList* ddl;
-  char *fpath = NULL, *name = NULL;
-  unsigned char *pi = NULL, *pf = NULL;
-  int fd = -1;
-  struct stat sa = {0};
   time_init();
-
-  if(strchr(arg, '/')) {     // it's a path, so open the exact file
-    fpath = arg;
-    name = strrchr(arg, '/')+1;
-  } else {                   // it's a name, so refer to the stash
-    name = arg;
-    if(!DDGetMakeStash()) return NULL;
-    fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1);
-    strcpy(fpath, DODO_STASH);
-    if(!hasterm(DODO_STASH)) strcat(fpath, "/");
-    strcat(fpath, name);
-  }
-
-  if(stat(fpath, &sa)) {
-    printf("<ERR> Problem stat()ing the stash for %s.\n", fpath);
-    if(strchr(arg, '/')) free(fpath);
-    return NULL;
-  }
-  if(-1==(fd = open(fpath, 0, S_IRUSR | S_IWUSR))) {
-    printf("<ERR> Problem opening the stash for %s.\n", fpath);
-    if(strchr(arg, '/')) free(fpath);
-    return NULL;
-  }
-  if(!strchr(arg, '/')) free(fpath);
-  pi = mmap(NULL, sa.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // map private -> CoW per page?
-  pf = &pi[sa.st_size-1];
-  close(fd);
 
   // Do a first pass to figure out how many nodes there are.
   unsigned char *p1 = pi, *p2 = pi;
@@ -373,8 +348,6 @@ DDList* FileToDDList(char* arg) {
   p1=pi;
 
   // Process line-by-line
-  ddl        = calloc(1,sizeof(DDList));
-  ddl->name  = strdup(name);
   unsigned int indent[MAX_INDENT]    = {0};  // ancestor indent amounts
   DDNode*      parents[MAX_INDENT+1] = {0};  parents[0] = &ddl->root;
   int id       = 0;   // current indentation level
@@ -433,8 +406,64 @@ DDList* FileToDDList(char* arg) {
     memcpy(node->desc, p1, p2-p1);
     p1=++p2; // next line
   }
+}
 
+DDList* FileToDDList(char* arg) {
+  char *fpath = NULL, *name = NULL;
+  unsigned char *pi = NULL, *pf = NULL;
+  int fd = -1;
+  struct stat sa = {0};
+
+  if(strchr(arg, '/')) {     // it's a path, so open the exact file
+    fpath = arg;
+    name = strrchr(arg, '/')+1;
+  } else {                   // it's a name, so refer to the stash
+    name = arg;
+    if(!DDGetMakeStash()) return NULL;
+    fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1);
+    strcpy(fpath, DODO_STASH);
+    if(!hasterm(DODO_STASH)) strcat(fpath, "/");
+    strcat(fpath, name);
+  }
+
+  if(stat(fpath, &sa)) {
+    printf("<ERR> Problem stat()ing the stash for %s.\n", fpath);
+    if(strchr(arg, '/')) free(fpath);
+    return NULL;
+  }
+  if(-1==(fd = open(fpath, 0, S_IRUSR | S_IWUSR))) {
+    printf("<ERR> Problem opening the stash for %s.\n", fpath);
+    if(strchr(arg, '/')) free(fpath);
+    return NULL;
+  }
+  if(!strchr(arg, '/')) free(fpath);
+  pi = mmap(NULL, sa.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // map private -> CoW per page?
+  pf = &pi[sa.st_size-1];
+  close(fd);
+
+  DDList* ddl = calloc(1,sizeof(DDList));
+  CharToDDList(ddl, pi, pf);
+  ddl->name  = strdup(name);
   munmap(pi, sa.st_size);
+  return ddl;
+}
+
+DDList* StdinToDDList(char* name) {
+  // TODO optimize the reader so that it can be chunked
+  DDList* ddl = calloc(1,sizeof(DDList));
+  size_t sz_buf = 4*4096, n=0, m=0;
+  unsigned char* pi = calloc(1,sz_buf), *pf = pi;
+
+  while(0<(n=read(0, pi+m, sz_buf-n))) {
+    sz_buf *= 2;
+    m += n;
+    pi = realloc(pi, sz_buf);
+    pf = m + pi;
+  }
+
+  CharToDDList(ddl, pi, pf);
+  ddl->name  = strdup(name);
+  free(pi);
   return ddl;
 }
 
@@ -442,6 +471,11 @@ DDList* FileToDDList(char* arg) {
 /******************************************************************************\
 |                        DDNode, DDList Print Functions                        |
 \******************************************************************************/
+char DDListToStdout(DDList* ddl) {
+  for(int i=0; i<ddl->root.n; i++)
+    DDNodeToFD(ddl->root.nodes[i], 0, 1);
+}
+
 void DDNodeToTextPrint(DDNode* dn, int depth) {
   static char fcord[] = "krgybmcw";
   static char bcord[] = "KRGYBMCW";
@@ -520,9 +554,13 @@ typedef enum DDPost {
 } DDPost;
 
 int main(int argc, char *argv[]) {
-  int c = 0, oi = 1;
+  int c = 0, oi = 1, rc = 0;
   unsigned int post = 0;
+  char default_name[] = "my_dodo";
+  char* name = default_name;
   char *oarg = NULL;
+  DDList* ddl;
+  struct stat sa = {0};
   static struct option lopts[] = {
     {"output", required_argument, 0, 'o'},
     {"help",         no_argument, 0, 'h'},
@@ -536,10 +574,10 @@ int main(int argc, char *argv[]) {
     {"notodo",       no_argument, 0, 'T'},
     {"nokids",       no_argument, 0, 'K'},
     {"noattr",       no_argument, 0, 'A'},
+    {"literal",      no_argument, 0, 'L'},
     {0}};
 
-  if(1==argc) return -1;
-  while(-1!=(c=getopt_long(argc, argv, "+i:o:hvqsdENDTKA", lopts, &oi))) {
+  while(-1!=(c=getopt_long(argc, argv, "+i:o:hvqsdENDTKAL", lopts, &oi))) {
     switch(c) {
     case 'o': oarg = optarg;         break;
     case 'h': print_help();          return 0;
@@ -553,14 +591,26 @@ int main(int argc, char *argv[]) {
     case 'T': DD_show_todo = 0;      break;
     case 'K': DD_show_children = 0;  break;
     case 'A': DD_plaintext = 1;      break;
+    case 'L': DD_literal= 1;         break;
     default: printf("Unrecognized option %s\n",argv[oi]); return -1;
     }
   }
 
-  DDList* ddl = FileToDDList(argv[argc-1]);
+  // Handle input.  If we get something on stdin and we have no name and no
+  // output, then it's effectively a dry run.
+  fstat(0, &sa);
+  if(sa.st_mode & S_IFIFO) {
+    if(!(ddl = StdinToDDList("New Todo")))  return -1;
+    if(optind == argc && !oarg) post|=DDP_DRY;
+  } else if(1==argc) {
+    print_summary();
+    return 0;
+  } else {
+    if(!(ddl = FileToDDList(argv[argc-1]))) return -1;
+  }
 
-  if(post & DDP_SORT)    DDListSort(ddl);
-  if(!DD_quiet)          DDListPrint(ddl);
-  if(!(post & DDP_DRY))  DDListToFile(ddl, oarg ? oarg : argv[argc-1]);
-  return 0;
+  if(post & DDP_SORT)       DDListSort(ddl);
+  if(!DD_quiet)             DD_literal ? DDListToStdout(ddl) : DDListPrint(ddl);
+  if(!(post & DDP_DRY))  rc=DDListToFile(ddl, oarg ? oarg : argv[argc-1]);
+  return rc;
 }
