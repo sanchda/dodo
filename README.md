@@ -2,7 +2,7 @@
 dodo is a terminal-based todo list manager and pretty-printer.
 
 ## Usage
-At a high level, dodo will take a todo list, convert it (if necessary) to a human-readable intermediate format, display it to the screen with a few bells and whistles, and inter it in ~/.dodo/stash for quick reference later.  Roughly speaking, a todo list a newline ('\n') delimited file whose entries are space-indented lines with optional leading bullets (such as + or -).  Lines are annotated with the date entered into dodo, as well as with any decorations specified by the line attributes (read the help with `dodo --help`).  A todo list may be specified:
+At a high level, dodo will take a todo list, convert it (if necessary) to a human-readable intermediate format, display it to the screen with a few bells and whistles, and inter it in ~/.dodo/stash for quick reference later.  Roughly speaking, a todo list a newline ('\n') delimited file whose records are space-indented lines with optional leading bullets (such as + or -).  Lines are annotated with the date entered into dodo, as well as with any decorations specified by the line attributes (read the help with `dodo --help`).  A todo list may be specified:
 
  * By name, e.g., `dodo foo`.  dodo will search in the stash for the list.
  * By path, e.g., `dodo relative/path/to/foo`. dodo open the specified file and save it in the stash as `foo`.
