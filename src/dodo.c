@@ -20,8 +20,18 @@
 |                                   Version                                    |
 \******************************************************************************/
 #define DD_MAJOR 0
-#define DD_MINOR 3
+#define DD_MINOR 5
 static int dd_major = DD_MAJOR, dd_minor = DD_MINOR;
+
+
+/******************************************************************************\
+|                                   Globals                                    |
+\******************************************************************************/
+#define MAX_INDENT 16
+#define MAX_MODS   5
+
+char* DODO_ROOT  = NULL;
+char* DODO_STASH = NULL;
 
 
 /******************************************************************************\
@@ -60,6 +70,7 @@ void print_help() {
 "  -o, --output          write to the specified location instead of the stash\n"
 "                        given by LIST.  Ignored if -d also given.\n"
 "  -d, --dry_run         do not save output (even if specified)\n"
+"  -e, --edit            open the specified stash with DODO_EDITOR\n"
 "\n"
 "Environment Variables\n"
 "dodo inspects the DODO_ROOT environment variable to look for configuration\n"
@@ -110,93 +121,6 @@ void print_help() {
 void print_version() { printf("dodo %d.%d\n", dd_major, dd_minor); }
 
 void print_summary() {}
-
-/******************************************************************************\
-|                              VT-100 Formatters                               |
-\******************************************************************************/
-#define FG(x) "\33[3"#x"m"
-#define BG(x) "\33[4"#x"m"
-#define AT(x) "\33[" #x"m"
-#define CLS   "\33[0m\33[39m\33[49m"
-char*F[]={FG(0),FG(1),FG(2),FG(3),FG(4),FG(5),FG(6),FG(7),FG(8),FG(9)};
-char*B[]={BG(0),BG(1),BG(2),BG(3),BG(4),BG(5),BG(6),BG(7),BG(8),BG(9)};
-char*A[]={AT(0),
-  AT(1),
-  AT(2),
-  AT(1) AT(2),
-  AT(4),
-  AT(4) AT(1),
-  AT(4) AT(2),
-  AT(4) AT(1) AT(2),
-  AT(5),
-  AT(5) AT(1),
-  AT(5) AT(2),
-  AT(5) AT(1) AT(2),
-  AT(5) AT(4),
-  AT(5) AT(4) AT(1),
-  AT(5) AT(4) AT(2),
-  AT(5) AT(4) AT(1) AT(2)};
-
-typedef enum sp_type {
-  SP_TODO  = 0,
-  SP_DONE  = 1<<0,
-  SP_HIPR  = 1<<1,
-  SP_STAR  = 1<<2,
-  SP_LOVE  = 1<<3,
-  SP_NOTE  = 1<<4,
-  SP_EXTRA = (SP_HIPR | SP_STAR | SP_LOVE)
-} sp_type;
-
-static char sp_todo[] = FG(5)"□"FG(9);
-static char sp_done[] = FG(2)"✓"FG(9);
-static char sp_hipr[] = FG(6)"!"FG(9);
-static char sp_star[] = FG(3)"★"FG(9);
-static char sp_love[] = FG(1)"♡"FG(9);
-static char sp_note[] = FG(4)"•"FG(9);
-
-
-/******************************************************************************\
-|                              Preference Globals                              |
-\******************************************************************************/
-static char DD_show_extra    = 1;
-static char DD_show_note     = 1;
-static char DD_show_todo     = 1;
-static char DD_show_done     = 1;
-static char DD_show_children = 1;
-static char DD_force_yes     = 0;
-static char DD_plaintext     = 0;
-static char DD_quiet         = 0;
-static char DD_literal       = 0;
-
-
-/******************************************************************************\
-|                                DDNode, DDList                                |
-\******************************************************************************/
-#define MAX_INDENT 16
-#define MAX_MODS   5
-
-char* DODO_ROOT  = NULL;
-char* DODO_STASH = NULL;
-typedef struct DDNode {
-  char            done;
-  char            type;
-  time_t          dt;
-  char            mods[MAX_MODS+1];
-  char*           desc;
-  struct DDNode** nodes;
-  unsigned int    n;
-} DDNode;
-
-typedef struct DDList {
-  char*          name;
-  DDNode         root;
-} DDList;
-
-int DDNodeAddNode(DDNode* p, DDNode* c) {
-  p->nodes = realloc(p->nodes, (p->n+1)*sizeof(DDNode*));
-  p->nodes[p->n] = c;
-  return ++p->n;
-}
 
 char* DDGetMakeRoot() {
   static char dodo_subdir[] = ".dodo/";
@@ -270,6 +194,119 @@ char* DDGetMakeStash() {
   return stashd;
 }
 
+
+char edit_file(char* arg) {
+  char* dodo_editor = getenv("DODO_EDITOR");
+  char *filename, *cmd;
+  if(!dodo_editor) {
+    printf("<ERR> No editor specified in DODO_EDITOR.\n");
+    return -1;
+  }
+
+  // Build the filename
+  if(strchr(arg, '/')) {   // if it's a path, use the exact file
+    filename = arg;
+  } else {                 // if not, use the name as a base
+    if(!DDGetMakeStash()) return -1;  // Maybe an error later?
+    filename = calloc(1, strlen(DODO_STASH) + 1 + strlen(arg) + 1 );
+    strcpy(filename, DODO_STASH);
+    if(!hasterm(DODO_STASH)) strcat(filename, "/");
+    strcat(filename, arg);
+  }
+
+  // Build the command string
+  cmd = calloc(1,strlen(dodo_editor) + 1 + strlen(filename) + 1);
+  strcpy(cmd, dodo_editor);
+  strcat(cmd, " ");
+  strcat(cmd, filename);
+  system(cmd);
+  if(!strchr(arg, '/')) free(filename);
+  return 0;
+}
+
+/******************************************************************************\
+|                              VT-100 Formatters                               |
+\******************************************************************************/
+#define FG(x) "\33[3"#x"m"
+#define BG(x) "\33[4"#x"m"
+#define AT(x) "\33[" #x"m"
+#define CLS   "\33[0m\33[39m\33[49m"
+char*F[]={FG(0),FG(1),FG(2),FG(3),FG(4),FG(5),FG(6),FG(7),FG(8),FG(9)};
+char*B[]={BG(0),BG(1),BG(2),BG(3),BG(4),BG(5),BG(6),BG(7),BG(8),BG(9)};
+char*A[]={AT(0),
+  AT(1),
+  AT(2),
+  AT(1) AT(2),
+  AT(4),
+  AT(4) AT(1),
+  AT(4) AT(2),
+  AT(4) AT(1) AT(2),
+  AT(5),
+  AT(5) AT(1),
+  AT(5) AT(2),
+  AT(5) AT(1) AT(2),
+  AT(5) AT(4),
+  AT(5) AT(4) AT(1),
+  AT(5) AT(4) AT(2),
+  AT(5) AT(4) AT(1) AT(2)};
+
+typedef enum sp_type {
+  SP_TODO  = 0,
+  SP_DONE  = 1<<0,
+  SP_HIPR  = 1<<1,
+  SP_STAR  = 1<<2,
+  SP_LOVE  = 1<<3,
+  SP_NOTE  = 1<<4,
+  SP_EXTRA = (SP_HIPR | SP_STAR | SP_LOVE)
+} sp_type;
+
+static char sp_todo[] = FG(5)"□"FG(9);
+static char sp_done[] = FG(2)"✓"FG(9);
+static char sp_hipr[] = FG(6)"!"FG(9);
+static char sp_star[] = FG(3)"★"FG(9);
+static char sp_love[] = FG(1)"♡"FG(9);
+static char sp_note[] = FG(4)"•"FG(9);
+
+
+/******************************************************************************\
+|                              Preference Globals                              |
+\******************************************************************************/
+static char DD_show_extra    = 1;
+static char DD_show_note     = 1;
+static char DD_show_todo     = 1;
+static char DD_show_done     = 1;
+static char DD_show_children = 1;
+static char DD_force_yes     = 0;
+static char DD_plaintext     = 0;
+static char DD_quiet         = 0;
+static char DD_literal       = 0;
+static char DD_edit          = 0;
+
+
+/******************************************************************************\
+|                                DDNode, DDList                                |
+\******************************************************************************/
+typedef struct DDNode {
+  char            done;
+  char            type;
+  time_t          dt;
+  char            mods[MAX_MODS+1];
+  char*           desc;
+  struct DDNode** nodes;
+  unsigned int    n;
+} DDNode;
+
+typedef struct DDList {
+  char*          name;
+  DDNode         root;
+} DDList;
+
+int DDNodeAddNode(DDNode* p, DDNode* c) {
+  p->nodes = realloc(p->nodes, (p->n+1)*sizeof(DDNode*));
+  p->nodes[p->n] = c;
+  return ++p->n;
+}
+
 void DDNodeToFD(DDNode* node, int depth, int fd) {
   struct tm tm_dt = {0};
   char _dt[32] = {0}; char* dt = _dt;
@@ -301,7 +338,6 @@ char DDListToFile(DDList* ddl, char* arg) {
     if(!hasterm(DODO_STASH)) strcat(fpath, "/");
     strcat(fpath, name);
   }
-
 
   // Build the temp filename based on stash path
   strcpy(ftemp, fpath);
@@ -577,7 +613,7 @@ int main(int argc, char *argv[]) {
     {"literal",      no_argument, 0, 'L'},
     {0}};
 
-  while(-1!=(c=getopt_long(argc, argv, "+i:o:hvqsdENDTKAL", lopts, &oi))) {
+  while(-1!=(c=getopt_long(argc, argv, "+i:o:hvqsdeENDTKAL", lopts, &oi))) {
     switch(c) {
     case 'o': oarg = optarg;         break;
     case 'h': print_help();          return 0;
@@ -585,6 +621,7 @@ int main(int argc, char *argv[]) {
     case 'q': DD_quiet = 1;          break;
     case 's': post |= DDP_SORT;      break;
     case 'd': post |= DDP_DRY;       break;
+    case 'e': DD_edit = 1;           break;
     case 'E': DD_show_extra= 0;      break;
     case 'N': DD_show_note = 0;      break;
     case 'D': DD_show_done = 0;      break;
@@ -606,6 +643,7 @@ int main(int argc, char *argv[]) {
     print_summary();
     return 0;
   } else {
+    if(DD_edit) edit_file(argv[argc-1]);
     if(!(ddl = FileToDDList(argv[argc-1]))) return -1;
   }
 
