@@ -70,7 +70,7 @@ void print_help() {
 "  -o, --output          write to the specified location instead of the stash\n"
 "                        given by LIST.  Ignored if -d also given.\n"
 "  -d, --dry_run         do not save output (even if specified)\n"
-"  -e, --edit            open the specified stash with DODO_EDITOR\n"
+"  -e, --edit            open the specified stash with $EDITOR, $DODO_EDITOR\n"
 "\n"
 "Environment Variables\n"
 "dodo inspects the DODO_ROOT environment variable to look for configuration\n"
@@ -196,10 +196,10 @@ char* DDGetMakeStash() {
 
 
 char edit_file(char* arg) {
-  char* dodo_editor = getenv("DODO_EDITOR");
+  char* dodo_editor = getenv("EDITOR") ? getenv("EDITOR") : getenv("DODO_EDITOR");
   char *filename, *cmd;
   if(!dodo_editor) {
-    printf("<ERR> No editor specified in DODO_EDITOR.\n");
+    printf("<ERR> No editor specified in EDITOR or DODO_EDITOR.\n");
     return -1;
   }
 
