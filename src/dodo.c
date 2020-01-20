@@ -120,8 +120,6 @@ void print_help() {
 
 void print_version() { printf("dodo %d.%d\n", dd_major, dd_minor); }
 
-void print_summary() {}
-
 char* DDGetMakeRoot() {
   static char dodo_subdir[] = ".dodo/";
   char *rootd = NULL, *buf = NULL;
@@ -193,6 +191,16 @@ char* DDGetMakeStash() {
   return stashd;
 }
 
+char print_summary() {
+  char* stash = DDGetMakeStash();
+  DIR* dir = opendir(stash);
+  struct dirent* d;
+  if(!dir) return -1;
+  printf("Lists:\n");
+  while((d=readdir(dir)))
+    if(strcmp(".",d->d_name) && strcmp("..",d->d_name)) printf("%s\n", d->d_name);
+  return 0;
+}
 
 char edit_file(char* arg) {
   char* dodo_editor = getenv("DODO_EDITOR") ? getenv("DODO_EDITOR") : getenv("EDITOR");
@@ -635,8 +643,7 @@ int main(int argc, char *argv[]) {
     if(!(ddl = StdinToDDList("New Todo")))  return -1;
     if(optind == argc && !oarg) post|=DDP_DRY;
   } else if(1==argc) {
-    print_summary();
-    return 0;
+    return print_summary();
   } else {
     if(DD_edit) edit_file(argv[argc-1]);
     if(!(ddl = FileToDDList(argv[argc-1]))) return -1;
