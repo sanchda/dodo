@@ -126,7 +126,6 @@ char* DDGetMakeRoot() {
   static char dodo_subdir[] = ".dodo/";
   char *rootd = NULL, *buf = NULL;
   DIR* dir;
-  struct stat sa = {0};
 
   // Check whether the user defined the DODO_ROOT env var
   if((buf=getenv("DODO_ROOT"))) {
@@ -276,7 +275,6 @@ static char DD_show_note     = 1;
 static char DD_show_todo     = 1;
 static char DD_show_done     = 1;
 static char DD_show_children = 1;
-static char DD_force_yes     = 0;
 static char DD_plaintext     = 0;
 static char DD_quiet         = 0;
 static char DD_literal       = 0;
@@ -320,7 +318,6 @@ void DDNodeToFD(DDNode* node, int depth, int fd) {
 
 char DDListToFile(DDList* ddl, char* arg) {
   int fd = -1, rc = 0;
-  unsigned char *payload = NULL, *p = NULL;
   char *name = NULL, *fpath = NULL, *ftemp = NULL;
 
   if(strchr(arg, '/')) {   // if it's a path, use the exact file
@@ -419,7 +416,7 @@ void CharToDDList(DDList* ddl, unsigned char* pi, unsigned char* pf) {
     if(meta) {
       // Process time
       struct tm tmt = {0};
-      if(mb = strptime(meta, "%y%m%d%H%M", &tmt)) {
+      if((mb = (unsigned char*)strptime((char*)meta, "%y%m%d%H%M", &tmt))) {
         meta=mb;
         node->dt = mktime(&tmt);
       }
@@ -507,7 +504,7 @@ DDList* StdinToDDList(char* name) {
 /******************************************************************************\
 |                        DDNode, DDList Print Functions                        |
 \******************************************************************************/
-char DDListToStdout(DDList* ddl) {
+void DDListToStdout(DDList* ddl) {
   for(int i=0; i<ddl->root.n; i++)
     DDNodeToFD(ddl->root.nodes[i], 0, 1);
 }
@@ -592,8 +589,6 @@ typedef enum DDPost {
 int main(int argc, char *argv[]) {
   int c = 0, oi = 1, rc = 0;
   unsigned int post = 0;
-  char default_name[] = "my_dodo";
-  char* name = default_name;
   char *oarg = NULL;
   DDList* ddl;
   struct stat sa = {0};

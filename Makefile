@@ -1,10 +1,10 @@
-INCLUDES = -Iinclude
+CFLAGS := -Wall -ggdb3 -m64 -std=c99 -Iinclude
 
-all: find
+all: dodo 
 .PHONY: all clean
 
 %: src/%.c
-	$(CC) -ggdb3 -m64 -std=c99 $(INCLUDES) -o $@ $< -lpthread
+	$(CC) $(CFLAGS) -o $@ $<
 
 clean:
 	rm -rf dodo
