@@ -195,7 +195,7 @@ char* DDGetMakeStash() {
 
 
 char edit_file(char* arg) {
-  char* dodo_editor = getenv("EDITOR") ? getenv("EDITOR") : getenv("DODO_EDITOR");
+  char* dodo_editor = getenv("DODO_EDITOR") ? getenv("DODO_EDITOR") : getenv("EDITOR");
   char *filename, *cmd;
   if(!dodo_editor) {
     printf("<ERR> No editor specified in EDITOR or DODO_EDITOR.\n");
