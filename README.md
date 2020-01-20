@@ -12,10 +12,15 @@ Largely speaking, the third form is captured by the second form, except in cases
 
 ## FAQ
 Q) Do you know about org mode?
+
 A) Yes.
 
+
 Q) This is cool, where can I find the JIRA integration?
-A) You are frightening me.
+
+A) Please stop, you are frightening me.
+
 
 Q) Would you like to know if this is broken?
+
 A) Yes, please.
