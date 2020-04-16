@@ -56,6 +56,7 @@ void print_help() {
 "  -v, --version         display version information and exit\n"
 "  -h, --help            display this help and exit\n"
 "  -q, --quiet           do not display output\n"
+"  -l, --list            display the list of valid todos and exit\n"
 "\n"
 "Display:\n"
 "  -E, --noextra         do not show tagged items (.e.g., heart, star)\n"
@@ -189,17 +190,6 @@ char* DDGetMakeStash() {
 
   DODO_STASH = stashd;
   return stashd;
-}
-
-char print_summary() {
-  char* stash = DDGetMakeStash();
-  DIR* dir = opendir(stash);
-  struct dirent* d;
-  if(!dir) return -1;
-  printf("Lists:\n");
-  while((d=readdir(dir)))
-    if(strcmp(".",d->d_name) && strcmp("..",d->d_name)) printf("%s\n", d->d_name);
-  return 0;
 }
 
 char edit_file(char* arg) {
@@ -584,6 +574,32 @@ void DDListSort(DDList* ddl) {
   qsort((void*)ddl->root.nodes, ddl->root.n, sizeof(DDNode*), DDNodeUserCompare);
 }
 
+char print_summary() {
+  char* stash = DDGetMakeStash();
+  DIR* dir = opendir(stash);
+  struct dirent* d;
+  int n_done=0, n_todo=0;
+  DDList* ddl;
+  if(!dir) return -1;
+  printf("Lists:\n");
+  while((d=readdir(dir))) {
+    if(!strcmp(".",d->d_name) || !strcmp("..",d->d_name)) continue;
+    printf("%s", d->d_name);
+    if(!(ddl=FileToDDList(d->d_name))) {
+      printf(": <ERR> could not read\n");
+    } else {
+      n_done = n_todo = 0;
+      for(int i=0; i<ddl->root.n; i++) {
+        n_todo += 0==ddl->root.nodes[i]->type;
+        n_done += 1==ddl->root.nodes[i]->done;
+      }
+      free(ddl);
+      printf(" [%d/%d]\n", n_done, n_todo);
+    }
+  }
+  return 0;
+}
+
 
 /******************************************************************************\
 |                                  Entrypoint                                  |
@@ -604,6 +620,7 @@ int main(int argc, char *argv[]) {
     {"output", required_argument, 0, 'o'},
     {"help",         no_argument, 0, 'h'},
     {"version",      no_argument, 0, 'v'},
+    {"list",         no_argument, 0, 'l'},
     {"quiet",        no_argument, 0, 'q'},
     {"sort",         no_argument, 0, 's'},
     {"dry_run",      no_argument, 0, 'd'},
@@ -616,22 +633,23 @@ int main(int argc, char *argv[]) {
     {"literal",      no_argument, 0, 'L'},
     {0}};
 
-  while(-1!=(c=getopt_long(argc, argv, "+i:o:hvqsdeENDTKAL", lopts, &oi))) {
+  while(-1!=(c=getopt_long(argc, argv, "+i:o:hvqsdleENDTKAL", lopts, &oi))) {
     switch(c) {
-    case 'o': oarg = optarg;         break;
-    case 'h': print_help();          return 0;
-    case 'v': print_version();       return 0;
-    case 'q': DD_quiet = 1;          break;
-    case 's': post |= DDP_SORT;      break;
-    case 'd': post |= DDP_DRY;       break;
-    case 'e': DD_edit = 1;           break;
-    case 'E': DD_show_extra= 0;      break;
-    case 'N': DD_show_note = 0;      break;
-    case 'D': DD_show_done = 0;      break;
-    case 'T': DD_show_todo = 0;      break;
-    case 'K': DD_show_children = 0;  break;
-    case 'A': DD_plaintext = 1;      break;
-    case 'L': DD_literal= 1;         break;
+    case 'o': oarg = optarg;              break;
+    case 'h': print_help();               return 0;
+    case 'v': print_version();            return 0;
+    case 'l': print_summary();            return 0;
+    case 'q': DD_quiet = 1;               break;
+    case 's': post |= DDP_SORT;           break;
+    case 'd': post |= DDP_DRY;            break;
+    case 'e': DD_edit = 1;                break;
+    case 'E': DD_show_extra= 0;           break;
+    case 'N': DD_show_note = 0;           break;
+    case 'D': DD_show_done = 0;           break;
+    case 'T': DD_show_todo = 0;           break;
+    case 'K': DD_show_children = 0;       break;
+    case 'A': DD_plaintext = 1;           break;
+    case 'L': DD_literal= 1;              break;
     default: printf("Unrecognized option %s\n",argv[oi]); return -1;
     }
   }
