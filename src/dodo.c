@@ -15,6 +15,11 @@
 #include <pwd.h>
 #include <getopt.h>
 
+/* Highly technical notes, abbreviated:
+ * Please don't post to the orange website, please don't use this for learning,
+ * please don't use this for evaluation.  Please do let me know if it's broken.
+ */
+
 
 /******************************************************************************\
 |                                   Version                                    |
