@@ -1,4 +1,4 @@
-CFLAGS := -Wall -ggdb3 -m64 -std=c99 -Iinclude
+CFLAGS := -Wall -Os -m64 -std=c99 -Iinclude
 
 all: dodo 
 .PHONY: all clean
