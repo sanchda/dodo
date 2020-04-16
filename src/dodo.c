@@ -25,7 +25,7 @@
 |                                   Version                                    |
 \******************************************************************************/
 #define DD_MAJOR 0
-#define DD_MINOR 5
+#define DD_MINOR 6
 static int dd_major = DD_MAJOR, dd_minor = DD_MINOR;
 
 
@@ -503,7 +503,6 @@ DDList* StdinToDDList(char* name) {
   return ddl;
 }
 
-
 /******************************************************************************\
 |                        DDNode, DDList Print Functions                        |
 \******************************************************************************/
@@ -629,6 +628,7 @@ int main(int argc, char *argv[]) {
     {"quiet",        no_argument, 0, 'q'},
     {"sort",         no_argument, 0, 's'},
     {"dry_run",      no_argument, 0, 'd'},
+    {"edit",         no_argument, 0, 'e'},
     {"noextra",      no_argument, 0, 'E'},
     {"nonote",       no_argument, 0, 'N'},
     {"nodone",       no_argument, 0, 'D'},
@@ -677,3 +677,4 @@ int main(int argc, char *argv[]) {
   if(!(post & DDP_DRY))  rc=DDListToFile(ddl, oarg ? oarg : argv[argc-1]);
   return rc;
 }
+
