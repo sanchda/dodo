@@ -39,7 +39,7 @@ char* DODO_STASH = NULL;
 /******************************************************************************\
 |                                   Helpers                                    |
 \******************************************************************************/
-time_t         tt_now     = {0};  // hold regular unix time
+time_t tt_now = {0};  // hold regular unix time
 void time_init() {tt_now = time(NULL);}
 
 static inline int days_diff(time_t a, time_t b) {
@@ -124,7 +124,7 @@ void print_help() {
 void print_version() { printf("dodo %d.%d\n", dd_major, dd_minor); }
 
 char* DDGetMakeRoot() {
-  static char dodo_subdir[] = ".dodo/";
+  static const char dodo_subdir[] = ".dodo/";
   char *rootd = NULL, *buf = NULL;
   DIR* dir;
 
@@ -173,7 +173,7 @@ char* DDGetMakeRoot() {
 
 
 char* DDGetMakeStash() {
-  static char dodo_stash[] = "stash/";
+  static const char dodo_stash[] = "stash/";
   char *stashd;
   DIR* dir;
   if(!DODO_ROOT) {
@@ -230,7 +230,10 @@ char edit_file(char* arg) {
   strcpy(cmd, dodo_editor);
   strcat(cmd, " ");
   strcat(cmd, filename);
-  system(cmd);
+  if (system(cmd)) {
+    printf("Could not launch editor.\n");
+    exit(-1);
+  }
   if(!strchr(arg, '/')) free(filename);
   return 0;
 }
@@ -272,12 +275,12 @@ typedef enum sp_type {
   SP_EXTRA = (SP_HIPR | SP_STAR | SP_LOVE)
 } sp_type;
 
-static char sp_todo[] = FG(5)"□"FG(9);
-static char sp_done[] = FG(2)"✓"FG(9);
-static char sp_hipr[] = FG(6)"!"FG(9);
-static char sp_star[] = FG(3)"★"FG(9);
-static char sp_love[] = FG(1)"♡"FG(9);
-static char sp_note[] = FG(4)"•"FG(9);
+static const char sp_todo[] = FG(5)"□"FG(9);
+static const char sp_done[] = FG(2)"✓"FG(9);
+static const char sp_hipr[] = FG(6)"!"FG(9);
+static const char sp_star[] = FG(3)"★"FG(9);
+static const char sp_love[] = FG(1)"♡"FG(9);
+static const char sp_note[] = FG(4)"•"FG(9);
 
 
 /******************************************************************************\
@@ -566,11 +569,11 @@ void DDNodeToTextPrint(DDNode* dn, int depth) {
   if(!DD_show_done  && (SP_DONE & sp)) return;
   if(!DD_show_todo  && SP_TODO == sp)  return;
   if(!DD_show_extra && ((SP_HIPR | SP_STAR | SP_LOVE) & sp)) return;
-  char* front = SP_NOTE & sp ? sp_note :
-                SP_DONE & sp ? sp_done :
-                SP_HIPR & sp ? sp_hipr :
-                SP_STAR & sp ? sp_star :
-                SP_LOVE & sp ? sp_love : sp_todo;
+  const char* front = SP_NOTE & sp ? sp_note :
+                      SP_DONE & sp ? sp_done :
+                      SP_HIPR & sp ? sp_hipr :
+                      SP_STAR & sp ? sp_star :
+                      SP_LOVE & sp ? sp_love : sp_todo;
   char _mods[32] = {0}; char* mods = _mods;
   strcat(mods, A[at]); strcat(mods, F[fg]); strcat(mods, B[bg]);
 
@@ -615,14 +618,38 @@ void DDListSort(DDList* ddl) {
 }
 
 char print_summary() {
-  char* stash = DDGetMakeStash();
-  DIR* dir = opendir(stash);
+  size_t hit_count = 0;
+  char* stash;
+  DIR* dir;
   struct dirent* d;
   int n_done=0, n_todo=0;
   DDList* ddl;
-  if(!dir) return -1;
-  printf("Lists:\n");
+
+
+  if (!(stash = DDGetMakeStash()) || !(dir = opendir(stash)))
+    return -1;
+
+  char* path = calloc(strlen(stash) + 256 + 1, 1);
+  if (!path) {
+    printf("Could not allocate.\n");
+    exit(-1);
+  }
+  strcpy(stash, path);
+  char* path_file = path + strlen(stash);
+  path_file[1] = '/';
+  path_file += 2; // advance beyond '/'
+
   while((d=readdir(dir))) {
+    // Not all _common_ filesystems support d_type, so just be slow
+    strcpy(path_file, d->d_name);
+    struct stat sa;
+    if (lstat(path, &sa)) // If we can't open it, just skip
+      continue;
+    if (!(sa.st_mode & S_IFREG)) // If it isn't a file, skip
+      continue;
+    if (hit_count < 1)
+      printf("Lists:\n");
+    hit_count++;
     if(!strcmp(".",d->d_name) || !strcmp("..",d->d_name)) continue;
     printf("%s", d->d_name);
     if(!(ddl=FileToDDList(d->d_name))) {
@@ -639,6 +666,10 @@ char print_summary() {
       ddl->region_sz = 0;
     }
   }
+  
+  if (hit_count < 1)
+    printf("No dodo files found in stash %s\n", stash);
+  free(path);
   return 0;
 }
 
