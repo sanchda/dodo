@@ -1,4 +1,4 @@
-CFLAGS := -Wall -Os -m64 -std=c99 -Iinclude
+CFLAGS := -fanalyzer -Wall -Wextra -Werror -Os -std=c11 -Iinclude
 
 all: dodo 
 .PHONY: all clean

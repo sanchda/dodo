@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 500
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,17 +16,13 @@
 #include <pwd.h>
 #include <getopt.h>
 
-/* Highly technical notes, abbreviated:
- * Please don't post to the orange website, please don't use this for learning,
- * please don't use this for evaluation.  Please do let me know if it's broken.
- */
-
+// This is just for fun.
 
 /******************************************************************************\
 |                                   Version                                    |
 \******************************************************************************/
 #define DD_MAJOR 0
-#define DD_MINOR 6
+#define DD_MINOR 7
 static int dd_major = DD_MAJOR, dd_minor = DD_MINOR;
 
 
@@ -174,6 +171,7 @@ char* DDGetMakeRoot() {
   return rootd;
 }
 
+
 char* DDGetMakeStash() {
   static char dodo_stash[] = "stash/";
   char *stashd;
@@ -181,7 +179,11 @@ char* DDGetMakeStash() {
   if(!DODO_ROOT) {
     if(!DDGetMakeRoot()) return NULL;
   }
-  stashd = calloc(1,strlen(DODO_ROOT) + 1 + strlen(dodo_stash) + 1);
+  stashd = calloc(strlen(DODO_ROOT) + strlen(dodo_stash) + 1, 1);
+  if (!stashd) {
+    printf("Could not allocate.\n");
+    exit(-1);
+  }
   strcpy(stashd, DODO_ROOT);
   if(!hasterm(DODO_ROOT)) strcat(DODO_ROOT, "/");
   strcat(stashd, dodo_stash);
@@ -189,7 +191,6 @@ char* DDGetMakeStash() {
   // Check to make sure it exists
   if(!(mkdir(stashd, 0700), (dir=opendir(stashd)),closedir(dir),dir)) {
     printf("<ERR> Could not create or open stash directory (%s)\n", stashd);
-    free(stashd);
     return NULL;
   }
 
@@ -211,6 +212,10 @@ char edit_file(char* arg) {
   } else {                 // if not, use the name as a base
     if(!DDGetMakeStash()) return -1;  // Maybe an error later?
     filename = calloc(1, strlen(DODO_STASH) + 1 + strlen(arg) + 1 );
+    if (!filename) {
+      printf("Could not allocate; out of room.\n");
+      exit(-1); // Don't even try to salvage this.
+    }
     strcpy(filename, DODO_STASH);
     if(!hasterm(DODO_STASH)) strcat(filename, "/");
     strcat(filename, arg);
@@ -218,6 +223,10 @@ char edit_file(char* arg) {
 
   // Build the command string
   cmd = calloc(1,strlen(dodo_editor) + 1 + strlen(filename) + 1);
+  if (!cmd) {
+    printf("Could not allocate; out of room.\n");
+    exit(-1); // No point in even trying
+  }
   strcpy(cmd, dodo_editor);
   strcat(cmd, " ");
   strcat(cmd, filename);
@@ -233,9 +242,10 @@ char edit_file(char* arg) {
 #define BG(x) "\33[4"#x"m"
 #define AT(x) "\33[" #x"m"
 #define CLS   "\33[0m\33[39m\33[49m"
-char*F[]={FG(0),FG(1),FG(2),FG(3),FG(4),FG(5),FG(6),FG(7),FG(8),FG(9)};
-char*B[]={BG(0),BG(1),BG(2),BG(3),BG(4),BG(5),BG(6),BG(7),BG(8),BG(9)};
-char*A[]={AT(0),
+const char*F[]={FG(0),FG(1),FG(2),FG(3),FG(4),FG(5),FG(6),FG(7),FG(8),FG(9)};
+const char*B[]={BG(0),BG(1),BG(2),BG(3),BG(4),BG(5),BG(6),BG(7),BG(8),BG(9)};
+const char*A[]={
+  AT(0),
   AT(1),
   AT(2),
   AT(1) AT(2),
@@ -300,6 +310,8 @@ typedef struct DDNode {
 typedef struct DDList {
   char*          name;
   DDNode         root;
+  void *         region; // To be unmapped
+  size_t         region_sz;
 } DDList;
 
 int DDNodeAddNode(DDNode* p, DDNode* c) {
@@ -315,23 +327,34 @@ void DDNodeToFD(DDNode* node, int depth, int fd) {
   strptime(dt, "%s",  &tm_dt);
   strftime(dt, 32, "%y%m%d%H%M", &tm_dt);
   dprintf(fd, "%*s%s {%s,%s} %s\n", 2*depth, "", "*", dt, node->mods, node->desc);
-  for(int i=0; i<node->n; i++)
+  for(unsigned i=0; i<node->n; i++)
     DDNodeToFD(node->nodes[i], depth+1, fd);
 }
 
 char DDListToFile(DDList* ddl, char* arg) {
+  if (!ddl || !arg || !*arg)
+    return -1;
   int fd = -1, rc = 0;
   char *name = NULL, *fpath = NULL, *ftemp = NULL;
 
   if(strchr(arg, '/')) {   // if it's a path, use the exact file
     name = strrchr(arg, '/')+1;
-    fpath = name;
+    fpath = calloc(1, strlen(name)); // Not necessary, but makes path symmetric
     ftemp = calloc(1, strlen(fpath) + 1 + 6 + 1);
+    if (!ftemp) {
+      printf("Could not allocate.\n");
+      exit(-1);
+    }
+    strcpy(fpath, name);
   } else {                 // if not, use the name as a base
     name = arg;
     if(!DDGetMakeStash()) return 0;
     fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1 );
     ftemp = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1 + 6 + 1);
+    if (!ftemp || !fpath) {
+      printf("Could not allocate.\n");
+      exit(-1);
+    }
 
     // Build the directory tree for the stash
     strcpy(fpath, DODO_STASH);
@@ -346,21 +369,17 @@ char DDListToFile(DDList* ddl, char* arg) {
   // Open the temp file
   if(-1==((fd=mkstemp(ftemp)))) {
     printf("<ERR> I cannot create the stash for %s.\n", fpath);
-    if(strchr(arg, '/')) free(fpath);
-    free(ftemp);
     rc = -1;
     goto DDLTOF_CLEANUP;
   }
 
   // Populate new temp file
-  for(int i=0; i<ddl->root.n; i++)
+  for(unsigned i=0; i<ddl->root.n; i++)
     DDNodeToFD(ddl->root.nodes[i], 0, fd);
 
   // Rename to the desired path and we're done
   if(-1==(rename(ftemp, fpath))) {
     printf("<ERR> I cannot finalize the stash for %s.\n", fpath);
-    if(strchr(arg, '/')) free(fpath);
-    free(ftemp);
     rc = -1;
   }
 
@@ -386,12 +405,16 @@ void CharToDDList(DDList* ddl, unsigned char* pi, unsigned char* pf) {
   // Process line-by-line
   unsigned int indent[MAX_INDENT]    = {0};  // ancestor indent amounts
   DDNode*      parents[MAX_INDENT+1] = {0};  parents[0] = &ddl->root;
-  int id       = 0;   // current indentation level
-  int il       = -1;  // current line number (inc before, so negative)
+  int id = 0;   // current indentation level
+  int il = -1;  // current line number (inc before, so negative)
 
   while(++il,p1 < pf) {
     DDNode* node = calloc(1,sizeof(DDNode));
-    int d = 0;
+    if (!node) {
+      printf("Could not allocate room for node.");
+      exit(-1); // We can't clean up or anything, so just stop.
+    }
+    unsigned d = 0;
     while(isspace(*p1) && p1<=pf) {p1++;d++;} // skip spaces
     if(T[*p1]) while(T[*p1] && p1<=pf) p1++;  // bullet marks front of line
     p2 = p1;                                  // catch p2 up to p1
@@ -432,31 +455,42 @@ void CharToDDList(DDList* ddl, unsigned char* pi, unsigned char* pf) {
         node->mods[im] = *meta++;
       }
       p1=++p2;  // skip metadata for payload
-      while(isspace(*p1)) p1++;                 // skip any pre-payload spaces
+      while(isspace(*p1) && p1 < pf) p1++;               // skip any pre-payload spaces
     }
     p2=p1;
 
     // The rest of the line is the payload
-    while('\n' != *p2) p2++;
-    node->desc = calloc(1+p2-p1,1);
-    memcpy(node->desc, p1, p2-p1);
+    while('\n' != *p2 && p2 < pf) p2++;
+    node->desc = (char*)p1;
+    *p2 = '\0';
     p1=++p2; // next line
   }
 }
 
 DDList* FileToDDList(char* arg) {
+  if (!arg || !*arg)
+    return NULL;
   char *fpath = NULL, *name = NULL;
   unsigned char *pi = NULL, *pf = NULL;
   int fd = -1;
   struct stat sa = {0};
 
   if(strchr(arg, '/')) {     // it's a path, so open the exact file
-    fpath = arg;
+    fpath = strdup(arg);
+    if (!fpath) {
+      printf("Could not allocate\n");
+      exit(-1);
+    }
+    strcpy(fpath, arg);
     name = strrchr(arg, '/')+1;
   } else {                   // it's a name, so refer to the stash
     name = arg;
     if(!DDGetMakeStash()) return NULL;
     fpath = calloc(1, strlen(DODO_STASH) + 1 + strlen(name) + 1);
+    if (!fpath) {
+      printf("Could not allocate\n");
+      exit(-1);
+    }
     strcpy(fpath, DODO_STASH);
     if(!hasterm(DODO_STASH)) strcat(fpath, "/");
     strcat(fpath, name);
@@ -464,24 +498,25 @@ DDList* FileToDDList(char* arg) {
 
   if(stat(fpath, &sa)) {
     printf("<ERR> Problem stat()ing the stash for %s.\n", fpath);
-    if(strchr(arg, '/')) free(fpath);
+    free(fpath);
     return NULL;
   }
   if(-1==(fd = open(fpath, 0, S_IRUSR | S_IWUSR))) {
     printf("<ERR> Problem opening the stash for %s.\n", fpath);
-    if(strchr(arg, '/')) free(fpath);
+    free(fpath);
     return NULL;
   }
-  if(!strchr(arg, '/')) free(fpath);
-  pi = mmap(NULL, sa.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // map private -> CoW per page?
+  free(fpath);
+  pi = mmap(NULL, sa.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0); // CoW
   pf = &pi[sa.st_size-1];
   close(fd);
 
-  DDList* ddl = calloc(1,sizeof(DDList));
-  CharToDDList(ddl, pi, pf);
-  ddl->name  = strdup(name);
-  munmap(pi, sa.st_size);
-  return ddl;
+  static DDList ddl = {0};
+  CharToDDList(&ddl, pi, pf);
+  ddl.name  = strdup(name);
+  ddl.region = pi;
+  ddl.region_sz = sa.st_size;
+  return &ddl;
 }
 
 DDList* StdinToDDList(char* name) {
@@ -507,16 +542,17 @@ DDList* StdinToDDList(char* name) {
 |                        DDNode, DDList Print Functions                        |
 \******************************************************************************/
 void DDListToStdout(DDList* ddl) {
-  for(int i=0; i<ddl->root.n; i++)
+  for(unsigned i=0; i<ddl->root.n; i++)
     DDNodeToFD(ddl->root.nodes[i], 0, 1);
 }
 
 void DDNodeToTextPrint(DDNode* dn, int depth) {
-  static char fcord[] = "krgybmcw";
-  static char bcord[] = "KRGYBMCW";
-  static char acord[] = "012457}}";
-  static char scord[] = "$!#@?}}}"; static int sval[] = {SP_DONE, SP_HIPR, SP_STAR, SP_LOVE, SP_NOTE};
-  char bg=9, fg=9, sp=0; int at=0,j=0,i=0;
+  static unsigned char fcord[] = "krgybmcw";
+  static unsigned char bcord[] = "KRGYBMCW";
+  static unsigned char acord[] = "012457}}";
+  static unsigned char scord[] = "$!#@?}}}"; static int sval[] = {SP_DONE, SP_HIPR, SP_STAR, SP_LOVE, SP_NOTE};
+  unsigned bg=9, fg=9, sp=0;
+  unsigned at=0,j=0,i=0;
   for(i=0; i<MAX_MODS; i++) {
     for(j=0; j<8; j++) {
       if(fcord[j] == dn->mods[i]) fg=j;
@@ -544,19 +580,19 @@ void DDNodeToTextPrint(DDNode* dn, int depth) {
     printf("%*s%s %s%s"CLS" "AT(2)"%dd"CLS"\n", depth, "", front, mods, dn->desc, days_diff(tt_now, dn->dt));
 
   if(DD_show_children)
-    for(int i=0; i<dn->n; i++)
+    for(unsigned i=0; i<dn->n; i++)
       DDNodeToTextPrint(dn->nodes[i], depth+2);
 }
 
 void DDListPrint(DDList* ddl) {
   int n_todo=0, n_done=0;
-  for(int i=0; i<ddl->root.n; i++) {
+  for(unsigned i=0; i<ddl->root.n; i++) {
     n_todo += 0==ddl->root.nodes[i]->type;
     n_done += 1==ddl->root.nodes[i]->done;
   }
 
   printf(" \33[4m%s\33[0m\t[%d/%d]\n\n", ddl->name, n_done, n_todo);
-  for(int i=0; i<ddl->root.n; i++)
+  for(unsigned i=0; i<ddl->root.n; i++)
     DDNodeToTextPrint(ddl->root.nodes[i], 1);
 }
 
@@ -593,12 +629,14 @@ char print_summary() {
       printf(": <ERR> could not read\n");
     } else {
       n_done = n_todo = 0;
-      for(int i=0; i<ddl->root.n; i++) {
+      for(unsigned i=0; i<ddl->root.n; i++) {
         n_todo += 0==ddl->root.nodes[i]->type;
         n_done += 1==ddl->root.nodes[i]->done;
       }
-      free(ddl);
       printf(" [%d/%d]\n", n_done, n_todo);
+      munmap(ddl->region, ddl->region_sz);
+      ddl->region = NULL;
+      ddl->region_sz = 0;
     }
   }
   return 0;
@@ -615,6 +653,12 @@ typedef enum DDPost {
 } DDPost;
 
 int main(int argc, char *argv[]) {
+  // Fence off the input, mostly to quiet sanitizers
+  for (int i = 0; i < argc; i++) {
+    if(!argv[i] || !*argv[i]) {
+      printf("Argument %d is empty?  Please send better arguments.\n", i);
+    }
+  }
   int c = 0, oi = 1, rc = 0;
   unsigned int post = 0;
   char *oarg = NULL;
@@ -675,6 +719,13 @@ int main(int argc, char *argv[]) {
   if(post & DDP_SORT)       DDListSort(ddl);
   if(!DD_quiet)             DD_literal ? DDListToStdout(ddl) : DDListPrint(ddl);
   if(!(post & DDP_DRY))  rc=DDListToFile(ddl, oarg ? oarg : argv[argc-1]);
+
+  // Cleanup, make sanitizers happy
+  if (ddl->region) {
+    munmap(ddl->region, ddl->region_sz);
+    ddl->region = NULL;
+    ddl->region_sz = 0;
+  }
   return rc;
 }
 
